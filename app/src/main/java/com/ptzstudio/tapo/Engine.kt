@@ -141,7 +141,11 @@ class Engine(private val context: Context) {
     @Volatile private var lastMoveError = 0L
 
     private val motor = TapoMotor(
-        move = { x, y -> api?.move(x, y) ?: throw TapoException("Sem câmera") },
+        move = { x, y ->
+            // Com o login recusado, não tenta de novo a cada passo (a câmera bloquearia a conta).
+            if (_link.value == LinkState.LOGIN_FAILED) throw TapoException(_linkDetail.value ?: "Login recusado")
+            api?.move(x, y) ?: throw TapoException("Sem câmera")
+        },
         stepMax = { _settings.value.moveStep },
         onError = { e -> onMoveError(e) },
     )
@@ -499,6 +503,10 @@ class Engine(private val context: Context) {
         val a = api
         if (a == null) {
             say("Nenhuma câmera escolhida")
+            return
+        }
+        if (_link.value == LinkState.LOGIN_FAILED) {
+            say(_linkDetail.value ?: "Login recusado: confira a senha em Câmeras › Editar")
             return
         }
         net.execute {
