@@ -588,12 +588,21 @@ class Engine(private val context: Context) {
         }
         val want = l.on != true
         onNet("Luz") { a ->
-            a.setLight(l.kind, want, l.on)
-            val now = try { a.lightOn(l.kind) } catch (_: Exception) { want }
-            _light.value = LightState(l.kind, now ?: want)
-            say(if ((now ?: want)) "Luz acesa" else "Luz apagada")
+            // O holofote só tem o comando "inverter": usa sempre ele, sem confiar no estado lido antes
+            // (algumas câmeras informam o estado de outro jeito, e aí o comando nunca era mandado).
+            if (l.kind == LightKind.WHITELAMP) a.setLight(l.kind, want, null) else a.setLight(l.kind, want, l.on)
+            val read = try { a.lightOn(l.kind) } catch (_: Exception) { null }
+            lightRaw = read
+            // Mostra o estado pedido; o lido da câmera só vale se mudou junto (senão ele não é confiável).
+            val now = if (read != null && read == want) read else want
+            _light.value = LightState(l.kind, now)
+            say(if (now) "Luz acesa" else "Luz apagada")
         }
     }
+
+    /** Último estado da luz lido da câmera (para o relatório). */
+    @Volatile var lightRaw: Boolean? = null
+        private set
 
     fun takePhoto() {
         _photoRequests.tryEmit(Unit)

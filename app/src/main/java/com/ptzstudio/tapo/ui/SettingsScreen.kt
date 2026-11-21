@@ -113,7 +113,8 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit, onMapping: () -> Unit) {
                 Text(
                     when (val l = light) {
                         null -> "Luz: não encontrada nesta câmera"
-                        else -> "Luz: comando ${l.kind.name.lowercase()}" + when (l.on) { true -> " (acesa)"; false -> " (apagada)"; null -> "" }
+                        else -> "Luz: comando ${l.kind.name.lowercase()}" + when (l.on) { true -> " (acesa)"; false -> " (apagada)"; null -> "" } +
+                            " · lido da câmera: " + when (engine.lightRaw) { true -> "acesa"; false -> "apagada"; null -> "—" }
                     },
                     color = Palette.Soft, fontSize = 13.sp,
                 )
@@ -124,7 +125,8 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit, onMapping: () -> Unit) {
                     PadTile("Ver detalhes do login", Modifier.fillMaxWidth()) { showTrace = true }
                 } else {
                     val trace = engine.loginTrace()
-                    val text = (listOf("PTZ Tapo ${BuildConfig.VERSION_NAME}", "Modelo: ${info?.model ?: "?"} ${info?.firmware ?: ""}") +
+                    val text = (listOf("PTZ Tapo ${BuildConfig.VERSION_NAME}", "Modelo: ${info?.model ?: "?"} ${info?.firmware ?: ""}",
+                        "Luz: ${light?.kind ?: "nenhuma"}, mostrada ${light?.on}, lida ${engine.lightRaw}") +
                         trace.ifEmpty { listOf("(ainda sem tentativa de login)") }).joinToString("\n")
                     Text(text, color = Palette.Soft, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

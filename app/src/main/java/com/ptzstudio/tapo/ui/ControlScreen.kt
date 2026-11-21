@@ -138,7 +138,7 @@ fun ControlScreen(engine: Engine, onCameras: () -> Unit, onSettings: () -> Unit)
                         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
                     ) {
-                        JoystickAndActions(engine, joystickSize = stick.dp)
+                        JoystickAndActions(engine, settings, joystickSize = stick.dp) { fullscreen = true }
                         SpeedSlider(engine, settings)
                         CameraLine(engine)
                     }
@@ -157,7 +157,7 @@ fun ControlScreen(engine: Engine, onCameras: () -> Unit, onSettings: () -> Unit)
                         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        JoystickAndActions(engine, joystickSize = stick.dp)
+                        JoystickAndActions(engine, settings, joystickSize = stick.dp) { fullscreen = true }
                         SpeedSlider(engine, settings)
                         CameraLine(engine)
                         PresetGrid(settings, engine, onEdit = { editPreset = it })
@@ -228,13 +228,6 @@ private fun VideoCard(engine: Engine, settings: AppSettings, modifier: Modifier,
             }
             else -> {
                 RtspVideo(rtsp, Modifier.fillMaxSize(), onView = { PhotoTaker.view = it })
-                Row(
-                    Modifier.align(Alignment.BottomEnd).padding(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    PadTile("Desligar", Modifier.width(90.dp)) { engine.setVideoEnabled(false) }
-                    PadTile("Tela cheia", Modifier.width(100.dp), onClick = onFullscreen)
-                }
             }
         }
     }
@@ -247,17 +240,30 @@ private const val SIDE_W = 64f
  * Um espaço do mesmo tamanho à esquerda mantém o joystick centralizado.
  */
 @Composable
-private fun JoystickAndActions(engine: Engine, joystickSize: Dp) {
+private fun JoystickAndActions(engine: Engine, settings: AppSettings, joystickSize: Dp, onFullscreen: () -> Unit) {
     val light by engine.light.collectAsState()
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Spacer(Modifier.width(SIDE_W.dp))
+        val h = maxOf(joystickSize * 0.44f, 64.dp)
+        // À esquerda: vídeo (fora da imagem, para não tapar a cena).
+        val hasVideo = settings.selectedCamera?.videoUrl.orEmpty().isNotBlank()
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SideButton("Tela", "cheia", false, h) {
+                if (!hasVideo) engine.say("Sem vídeo: coloque a Conta da câmera em Câmeras › Editar")
+                else {
+                    if (!settings.videoEnabled) engine.setVideoEnabled(true)
+                    onFullscreen()
+                }
+            }
+            SideButton("Vídeo", if (settings.videoEnabled) "ligado" else "desligado", settings.videoEnabled && hasVideo, h, onColor = Palette.Accent) {
+                engine.setVideoEnabled(!settings.videoEnabled)
+            }
+        }
         VirtualJoystick(engine, joystickSize)
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val h = maxOf(joystickSize * 0.44f, 64.dp)
             SideButton("Foto", "tirar", false, h) { engine.takePhoto() }
             val l = light
             SideButton(
@@ -274,18 +280,18 @@ private fun JoystickAndActions(engine: Engine, joystickSize: Dp) {
 }
 
 @Composable
-private fun SideButton(title: String, sub: String, on: Boolean, height: Dp, onClick: () -> Unit) {
+private fun SideButton(title: String, sub: String, on: Boolean, height: Dp, onColor: Color = Palette.Amber, onClick: () -> Unit) {
     Box(
         Modifier.width(SIDE_W.dp).height(height).clip(RoundedCornerShape(10.dp))
-            .background(if (on) Color(0xFF5A4A12) else Palette.Raised)
-            .border(1.dp, if (on) Palette.Amber else Palette.Border, RoundedCornerShape(10.dp))
+            .background(if (on) onColor.copy(alpha = 0.22f) else Palette.Raised)
+            .border(1.dp, if (on) onColor else Palette.Border, RoundedCornerShape(10.dp))
             .semantics { contentDescription = "$title $sub" }
             .pointerInput(Unit) { detectTapGestures(onTap = { onClick() }) },
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(title, color = Palette.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(sub, color = if (on) Palette.Amber else Palette.Muted, fontSize = 10.sp)
+            Text(sub, color = if (on) onColor else Palette.Muted, fontSize = 10.sp)
         }
     }
 }
