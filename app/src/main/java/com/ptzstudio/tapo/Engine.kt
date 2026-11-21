@@ -394,6 +394,9 @@ class Engine(private val context: Context) {
         lastHealthMs = 0L
     }
 
+    /** Passos do último login com a câmera (para descobrir por que ela recusou). */
+    fun loginTrace(): List<String> = api?.client?.loginTrace.orEmpty()
+
     /** Tenta conectar de novo (depois de corrigir a senha ou esperar o bloqueio passar). */
     fun reconnect() = applyCamera(force = true)
 

@@ -18,6 +18,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -113,6 +118,24 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit, onMapping: () -> Unit) {
                     color = Palette.Soft, fontSize = 13.sp,
                 )
                 PadTile("Conectar de novo", Modifier.fillMaxWidth()) { engine.reconnect() }
+                var showTrace by remember { mutableStateOf(false) }
+                val clipboard = LocalClipboardManager.current
+                if (!showTrace) {
+                    PadTile("Ver detalhes do login", Modifier.fillMaxWidth()) { showTrace = true }
+                } else {
+                    val trace = engine.loginTrace()
+                    val text = (listOf("PTZ Tapo ${BuildConfig.VERSION_NAME}", "Modelo: ${info?.model ?: "?"} ${info?.firmware ?: ""}") +
+                        trace.ifEmpty { listOf("(ainda sem tentativa de login)") }).joinToString("\n")
+                    Text(text, color = Palette.Soft, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        PadTile("Copiar", Modifier.weight(1f)) {
+                            clipboard.setText(AnnotatedString(text))
+                            engine.say("Detalhes copiados")
+                        }
+                        PadTile("Fechar", Modifier.weight(1f)) { showTrace = false }
+                    }
+                    Hint("Não mostra a senha. Copie e envie para quem está ajudando a configurar.")
+                }
                 Hint("Depois de uma senha errada o app para de tentar, porque a câmera bloqueia após várias tentativas. Corrija a senha e toque aqui.")
             }
 

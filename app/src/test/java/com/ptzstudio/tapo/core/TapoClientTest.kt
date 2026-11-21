@@ -70,6 +70,25 @@ class TapoClientTest {
     }
 
     @Test
+    fun jsonSemBarraEscapada() {
+        val o = org.json.JSONObject().put("a", "x/y+z==").put("b", "c:\\/d")
+        val back = org.json.JSONObject(TapoClient.json(o))
+        assertEquals("x/y+z==", back.getString("a"))
+        assertEquals("c:\\/d", back.getString("b"))
+        assertFalse(TapoClient.json(org.json.JSONObject().put("a", "x/y")).contains("\\/"))
+    }
+
+    @Test
+    fun registroDoLoginSemSenha() {
+        val cam = FakeTapoCamera(TapoAuth.TPAP, pwd)
+        val c = TapoClient(cam, pwd)
+        TapoApi(c).info()
+        val t = c.loginTrace.joinToString("\n")
+        assertTrue(t, t.contains("login aceito"))
+        assertFalse(t.contains(pwd))
+    }
+
+    @Test
     fun presetsAreSorted() {
         val o = org.json.JSONObject("""{"preset":{"preset":{"id":["10","2"],"name":["B",""]}}}""")
         val p = TapoApi.parsePresets(o)

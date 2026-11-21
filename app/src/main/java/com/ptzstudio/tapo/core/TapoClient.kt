@@ -37,6 +37,27 @@ class TapoClient(
     @Volatile var auth: TapoAuth? = null
         private set
 
+    private val trace = ArrayDeque<String>()
+
+    /** Passos do último login, com os códigos que a câmera respondeu (sem senhas nem chaves). */
+    val loginTrace: List<String> get() = synchronized(trace) { trace.toList() }
+
+    private fun note(t: String) = synchronized(trace) {
+        trace.addLast(t)
+        while (trace.size > 40) trace.removeFirst()
+    }
+
+    private fun brief(o: JSONObject): String {
+        val r = o.optJSONObject("result")
+        val data = r?.optJSONObject("data")
+        val parts = mutableListOf("código ${o.optInt("error_code")}")
+        data?.optInt("code")?.takeIf { it != 0 }?.let { parts += "data.code $it" }
+        data?.opt("encrypt_type")?.let { parts += "encrypt_type $it" }
+        r?.optJSONObject("tpap")?.let { parts += "tpap pake=${it.opt("pake")} user_hash_type=${it.opt("user_hash_type")}" }
+        lockout(o).takeIf { it > 0 }?.let { parts += "bloqueio ${it}s" }
+        return parts.joinToString(", ")
+    }
+
     // Sessão
     private var stok: String? = null
     private var seq = 0
@@ -61,7 +82,7 @@ class TapoClient(
         ) + extra
 
     private fun postJson(path: String, o: JSONObject, extra: Map<String, String> = emptyMap()): JSONObject {
-        val r = http.post(path, o.toString().toByteArray(), headers(extra = extra))
+        val r = http.post(path, json(o).toByteArray(), headers(extra = extra))
         return parse(r)
     }
 
@@ -88,6 +109,7 @@ class TapoClient(
         } catch (e: TapoException) {
             null
         }
+        note("descoberta: " + (d?.let { brief(it) } ?: "sem resposta"))
         val found = when {
             d != null && tpapFrom(d) != null -> {
                 tpapInfo = tpapFrom(d)
@@ -97,6 +119,7 @@ class TapoClient(
             else -> {
                 // Mesma sondagem que o pytapo: o login antigo sem senha. -40211 = só aceita o login novo.
                 val p = login(JSONObject().put("encrypt_type", "3").put("username", USER).put("cnonce", hexNonce(8)))
+                note("sondagem do login antigo: ${brief(p)}")
                 when {
                     p.optInt("error_code") == -40211 -> TapoAuth.TPAP
                     legacyOffered(p) -> TapoAuth.LEGACY
@@ -105,6 +128,7 @@ class TapoClient(
             }
         }
         auth = found
+        note("tipo de login: ${found.label}")
         return found
     }
 
@@ -145,6 +169,8 @@ class TapoClient(
     @Synchronized
     fun connect() {
         if (password.isEmpty()) throw TapoException("Falta a senha da conta Tapo")
+        synchronized(trace) { trace.clear() }
+        note("senha com ${password.length} caracteres" + (if (password != password.trim()) " (tem espaço no começo ou no fim!)" else ""))
         when (detect()) {
             TapoAuth.LEGACY -> loginLegacy()
             TapoAuth.TPAP -> loginTpap()
@@ -155,17 +181,21 @@ class TapoClient(
     private fun loginLegacy() {
         cnonce = hexNonce(8)
         val first = login(JSONObject().put("cnonce", cnonce).put("encrypt_type", "3").put("username", USER))
+        note("login antigo, passo 1: ${brief(first)}")
         checkLockout(first)
         val data = first.optJSONObject("result")?.optJSONObject("data")
         val nonce = data?.optString("nonce").orEmpty()
         val confirm = data?.optString("device_confirm").orEmpty()
         if (nonce.isEmpty() || confirm.isEmpty()) throw TapoException("A câmera não aceitou o login (código ${first.optInt("error_code")})", first.optInt("error_code"))
         hashed = LegacyAuth.matchDeviceConfirm(password, cnonce, nonce, confirm)
+            ?.also { note("prova da câmera confere (${if (it.length == 64) "SHA-256" else "MD5"})") }
+            ?: run { note("prova da câmera NÃO confere com a senha (nem MD5 nem SHA-256)"); null }
             ?: throw TapoException("Senha errada. Use a senha da conta Tapo (a mesma do aplicativo Tapo).", -40411)
         val second = login(
             JSONObject().put("cnonce", cnonce).put("encrypt_type", "3")
                 .put("digest_passwd", LegacyAuth.digestPasswd(hashed, cnonce, nonce)).put("username", USER),
         )
+        note("login antigo, passo 2: ${brief(second)}")
         checkLockout(second)
         val r = second.optJSONObject("result")
         if (r == null || !r.has("start_seq") || r.optString("stok").isEmpty()) {
@@ -183,6 +213,7 @@ class TapoClient(
 
     private fun loginPlain() {
         val res = login(JSONObject().put("hashed", true).put("password", LegacyAuth.hashedMd5(password)).put("username", USER))
+        note("login simples: ${brief(res)}")
         checkLockout(res)
         val s = res.optJSONObject("result")?.optString("stok").orEmpty()
         if (s.isEmpty()) throw TapoException("Senha errada ou login recusado (código ${res.optInt("error_code")})", res.optInt("error_code"))
@@ -219,6 +250,8 @@ class TapoClient(
                 .put("user_random", TapoHash.b64(userRandom)).put("cipher_suites", JSONArray().put(1))
                 .put("encryption", JSONArray().put("aes_128_ccm")).put("passcode_type", "userpw"),
         )
+        note("TPAP registro (${if (passcode.length == 32) "MD5" else "SHA-256"}): ${brief(reg)}" +
+            (reg.optJSONObject("result")?.optJSONObject("extra_crypt")?.let { e -> ", extra ${e.optString("type")} id=${e.optJSONObject("params")?.opt("passwd_id")}" } ?: ""))
         val r = reg.optJSONObject("result") ?: run {
             checkLockout(reg)
             throw TapoException("A câmera recusou o login (código ${reg.optInt("error_code")})", reg.optInt("error_code"))
@@ -243,11 +276,13 @@ class TapoClient(
             JSONObject().put("sub_method", "pake_share")
                 .put("user_share", TapoHash.b64(client.userShare)).put("user_confirm", TapoHash.b64(client.userConfirm)),
         )
+        note("TPAP troca: ${brief(share)}")
         val sr = share.optJSONObject("result") ?: run {
             checkLockout(share)
             throw TapoException("Senha recusada (código ${share.optInt("error_code")})", share.optInt("error_code"))
         }
         if (!client.deviceConfirmOk(TapoHash.unb64(sr.getString("dev_confirm")))) {
+            note("TPAP: confirmação da câmera não confere")
             throw TapoException("A câmera não confirmou a senha", -40401)
         }
         val (k, n) = client.sessionKeyAndNonce()
@@ -255,6 +290,7 @@ class TapoClient(
         baseNonce = n
         stok = sr.getString("stok")
         seq = sr.optString("start_seq").toIntOrNull() ?: throw TapoException("Resposta de login incompleta")
+        note("TPAP: login aceito")
         val life = sr.optString("expired").toLongOrNull() ?: 3600L
         expiresAtMs = System.currentTimeMillis() + life * 1000
     }
@@ -296,9 +332,9 @@ class TapoClient(
     }
 
     private fun sendLegacy(request: JSONObject): JSONObject {
-        val enc = LegacyAuth.encrypt(lsk, ivb, request.toString().toByteArray())
-        val body = JSONObject().put("method", "securePassthrough")
-            .put("params", JSONObject().put("request", TapoHash.b64(enc))).toString()
+        val enc = LegacyAuth.encrypt(lsk, ivb, json(request).toByteArray())
+        val body = json(JSONObject().put("method", "securePassthrough")
+            .put("params", JSONObject().put("request", TapoHash.b64(enc))))
         val s = seq
         seq++
         val r = http.post(
@@ -323,7 +359,7 @@ class TapoClient(
         else JSONObject().put("method", "multipleRequest").put("params", JSONObject().put("requests", JSONArray().put(request)))
         val s = seq
         seq++
-        val body = intBytes(s) + AesCcm.seal(key, nonceFor(s), inner.toString().toByteArray())
+        val body = intBytes(s) + AesCcm.seal(key, nonceFor(s), json(inner).toByteArray())
         val r = http.post("/stok=$stok/ds", body, headers(contentType = "application/octet-stream"))
         val raw = r.body
         if (raw.isNotEmpty() && raw[0] == '{'.code.toByte()) {
@@ -363,6 +399,12 @@ class TapoClient(
     companion object {
         const val USER = "admin"
         val SESSION_ERRORS = setOf(-40401, -40421, -40413, -1, 9999)
+
+        /**
+         * JSON como o app Tapo manda: a org.json do Android escreve "/" como "\\/", o que estraga os textos em base64
+         * do login nas câmeras que não desfazem esse escape (a câmera acha que a senha está errada).
+         */
+        fun json(o: JSONObject): String = o.toString().replace("\\/", "/")
 
         fun intBytes(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
     }

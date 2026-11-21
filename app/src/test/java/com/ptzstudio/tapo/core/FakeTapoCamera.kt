@@ -47,6 +47,8 @@ class FakeTapoCamera(
     private fun reply(o: JSONObject, status: Int = 200) = HttpReply(status, o.toString().toByteArray())
 
     override fun post(path: String, body: ByteArray, headers: Map<String, String>): HttpReply {
+        // Como algumas câmeras de verdade: "\/" no texto não é desfeito, então o base64 com "/" chega estragado.
+        if (path == "/" && String(body).contains("\\/")) return reply(JSONObject().put("error_code", -40401))
         if (path == "/") return login(JSONObject(String(body)))
         if (path != "/stok=$stok/ds" || stok.isEmpty()) return reply(JSONObject().put("error_code", -40401))
         if (expireNext) {
