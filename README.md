@@ -24,8 +24,11 @@ Precisa de Android 10 ou mais novo.
 | Campo | Para que serve | Onde achar |
 |---|---|---|
 | Endereço IP | Achar a câmera na rede | App Tapo › câmera › engrenagem › Informações do dispositivo (ou no roteador) |
-| Senha da conta Tapo | Mover, presets e luz | A mesma senha usada para entrar no app Tapo (conta da dona da câmera) |
-| Conta da câmera (usuário e senha) | Só o vídeo ao vivo | Criar no app Tapo › câmera › engrenagem › Configurações avançadas › Conta da câmera |
+| Conta da câmera (usuário e senha) | Vídeo, movimento e presets (ONVIF) | Criar no app Tapo › câmera › engrenagem › Configurações avançadas › Conta da câmera |
+| Senha da conta Tapo (opcional) | Luz e gravações do cartão (e o movimento, se não usar a Conta da câmera) | A mesma senha usada para entrar no app Tapo |
+
+Com só a Conta da câmera, o app já mostra o vídeo, move a câmera (movimento contínuo pelo ONVIF, com velocidade) e
+usa os presets, sem depender da conta Tapo.
 
 **Importante:** no app Tapo, ligue **Eu › Serviços de terceiros › Compatibilidade com terceiros**
 (*Third-Party Compatibility*). Sem isso, câmeras com firmware novo (ex.: C500 1.3.5) recusam o login de outros
@@ -42,7 +45,8 @@ erradas a câmera bloqueia o login por um tempo; por isso o app para de tentar q
   (*TPAP*: SPAKE2+ com AES-CCM), escolhido sozinho conforme o firmware.
 - As contas de criptografia são conferidas nos testes com valores gerados pela própria pytapo, e o login completo
   dos dois tipos é testado contra uma câmera simulada. **Isso não substitui o teste na câmera de verdade** — veja `TESTES.md`.
-- A Tapo não tem "velocidade" de movimento: o app manda passos seguidos enquanto o joystick está inclinado, do
+- Com a Conta da câmera, o movimento e os presets vão pelo **ONVIF** (porta 2020, senha cifrada WS-Security).
+- Sem ela, pela conta Tapo: a Tapo não tem "velocidade" de movimento: o app manda passos seguidos enquanto o joystick está inclinado, do
   tamanho proporcional à inclinação e à velocidade escolhida (ajuste o tamanho máximo do passo em Ajustes).
 
 ## Compilar

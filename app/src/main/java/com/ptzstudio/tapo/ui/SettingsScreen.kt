@@ -86,7 +86,7 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit, onMapping: () -> Unit) {
                     engine.setMoveStep(it)
                 }
                 Hint(
-                    "A Tapo não tem velocidade: o app manda passos seguidos enquanto você segura. Este é o tamanho do passo com o " +
+                    "Só quando a câmera é movida pela conta Tapo (sem Conta da câmera): o app manda passos seguidos enquanto você segura. Este é o tamanho do passo com o " +
                         "analógico todo inclinado e a velocidade no máximo. Passo maior = anda mais rápido, mas para um pouco depois de soltar.",
                 )
                 PercentSlider("Aceleração gradual", m.rampPercent, 0..100) { set(m.copy(rampPercent = it)) }
@@ -109,7 +109,14 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit, onMapping: () -> Unit) {
                     Text("Modelo: ${i.model}" + (if (i.name.isNotBlank()) " · ${i.name}" else ""), color = Palette.Text, fontSize = 14.sp)
                     Text("Firmware: ${i.firmware}", color = Palette.Soft, fontSize = 13.sp)
                 }
-                auth?.let { Text(it.label, color = Palette.Soft, fontSize = 13.sp) }
+                val onvifOn by engine.usingOnvif.collectAsState()
+                val tapoNote by engine.tapoNote.collectAsState()
+                Text(
+                    if (onvifOn) "Movimento e presets: Conta da câmera (ONVIF)" else "Movimento e presets: conta Tapo",
+                    color = Palette.Text, fontSize = 14.sp,
+                )
+                auth?.let { Text("Conta Tapo: ${it.label}", color = Palette.Soft, fontSize = 13.sp) }
+                tapoNote?.let { Text(it, color = Palette.Amber, fontSize = 13.sp) }
                 Text(
                     when (val l = light) {
                         null -> "Luz: não encontrada nesta câmera"
@@ -122,7 +129,7 @@ fun SettingsScreen(engine: Engine, onBack: () -> Unit, onMapping: () -> Unit) {
                 var showTrace by remember { mutableStateOf(false) }
                 val clipboard = LocalClipboardManager.current
                 if (!showTrace) {
-                    PadTile("Ver detalhes do login", Modifier.fillMaxWidth()) { showTrace = true }
+                    PadTile("Ver detalhes da conexão", Modifier.fillMaxWidth()) { showTrace = true }
                 } else {
                     val trace = engine.loginTrace()
                     val text = (listOf("PTZ Tapo ${BuildConfig.VERSION_NAME}", "Modelo: ${info?.model ?: "?"} ${info?.firmware ?: ""}",

@@ -9,7 +9,7 @@ class SettingsCodecTest {
     fun idaEVolta() {
         val cam = CameraConfig(name = "Igreja", ip = "192.168.4.163", password = "conta#1", cameraUser = "cam", cameraPass = "p@ss w", presetSlots = mapOf(1 to "3", 2 to "7"))
         val s = AppSettings(
-            cameras = listOf(cam, CameraConfig(name = "Lateral", ip = "192.168.4.170", highQuality = false, rtspUrl = "rtsp://x/y")),
+            cameras = listOf(cam, CameraConfig(name = "Lateral", ip = "192.168.4.170", highQuality = false, rtspUrl = "rtsp://x/y", useOnvif = false)),
             selectedCameraId = cam.id,
             mapping = DefaultMapping.map + (PadButton.HOME to PadAction.PHOTO),
             moveStep = 25,

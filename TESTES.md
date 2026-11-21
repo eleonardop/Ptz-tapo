@@ -9,6 +9,7 @@ Ficam em `app/src/test`. Não usam câmera nem controle de verdade.
 | `TapoCryptoTest` | Contas do login antigo (prova da câmera, digest, chaves lsk/ivb, Tapo_tag, AES-CBC), AES-CCM, SHA-256-crypt e SPAKE2+ do login novo. **Os valores esperados foram gerados com a biblioteca pytapo** (Python) com as mesmas entradas; o SHA-256-crypt também confere com o `openssl passwd -5`. |
 | `TapoClientTest` | Login completo e pedidos contra uma **câmera simulada** nos três tipos de firmware (antigo, TPAP e muito antigo): informações, mover, presets (ler, ir, criar, apagar), luz, novo login automático quando a sessão expira, senha errada sem insistir (no máximo 2 tentativas) |
 | `TapoMotorTest` | Comando de Pan/Tilt do controlador vira passos de movimento do tamanho certo; passos seguidos enquanto segura e nenhum depois de soltar; fim do curso não é tratado como erro |
+| `OnvifTest` | Senha cifrada do ONVIF igual à calculada em Python; conexão, relógio da câmera atrasado, movimento contínuo, parada e presets (ler, criar, regravar, ir) contra uma câmera ONVIF simulada; Conta da câmera errada; o movimento só é reenviado quando muda e a parada é repetida se falhar |
 | `PresetSlotsTest` | Botões de preset ligados aos presets da câmera; preset apagado deixa o botão vazio; reconhece o preset novo depois de gravar |
 | `ControllerTest`, `MotionTest` | Movimento gradual, zona morta, curva, rampa, trava de diagonal, paradas de segurança (herdados do PTZ Studio) |
 | `MappingTest` | Lista pronta (RT = foto, LT = luz, A/B/X/Y = presets 1–4, direcional = Pan/Tilt); funções que a Tapo não tem (zoom, foco, brilho, Home) não aparecem |
@@ -19,6 +20,7 @@ Ficam em `app/src/test`. Não usam câmera nem controle de verdade.
 Só dá para confirmar no celular, com as câmeras:
 
 - [x] **Login na C500 (firmware 1.3.5)**: funciona com a Compatibilidade com terceiros ligada no app Tapo (login seguro antigo, senha em SHA-256). Sem a chave, a câmera usa o login TPAP e recusou a senha.
+- [ ] **ONVIF na C500** (só a Conta da câmera): Ajustes mostra "Movimento e presets: Conta da câmera (ONVIF)" e o modelo; o joystick move com velocidade proporcional e para ao soltar; os presets do app Tapo aparecem e gravar regrava no lugar.
 - [ ] **Login** na C310 e na C320WS (ligar a Compatibilidade com terceiros antes). Ajustes › Câmera em uso mostra o modelo, o firmware e o tipo de login.
 - [ ] Senha errada: aparece **Login recusado** e o app para de tentar.
 - [x] **Vídeo** com a Conta da câmera (C500).

@@ -28,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -192,7 +193,8 @@ private fun SavedCameraCard(
                 Text(cam.name, color = Palette.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text(cam.ip.ifBlank { "(sem IP)" }, color = Palette.Soft, fontSize = 13.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Tag(if (cam.password.isNotEmpty()) "Conta Tapo" else "Sem senha")
+                    Tag(if (cam.onvifActive) "ONVIF" else if (cam.password.isNotEmpty()) "Conta Tapo" else "Sem login")
+                    if (cam.onvifActive && cam.password.isNotEmpty()) Tag("Luz")
                     if (cam.videoUrl.isNotBlank()) Tag(if (cam.rtspUrl.isNotBlank()) "Vídeo RTSP" else if (cam.highQuality) "Vídeo alta" else "Vídeo baixa")
                 }
             }
@@ -245,7 +247,8 @@ private fun CameraEditDialog(initial: CameraConfig, onDismiss: () -> Unit, onSav
     var high by remember { mutableStateOf(initial.highQuality) }
     var rtsp by remember { mutableStateOf(initial.rtspUrl) }
     var showAdvanced by remember { mutableStateOf(initial.rtspUrl.isNotBlank()) }
-    val valid = ip.isNotBlank() && password.isNotEmpty()
+    var onvifOn by remember { mutableStateOf(initial.useOnvif) }
+    val valid = ip.isNotBlank() && (password.isNotEmpty() || camUser.isNotBlank())
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -258,18 +261,7 @@ private fun CameraEditDialog(initial: CameraConfig, onDismiss: () -> Unit, onSav
                     ip, { ip = it.trim() }, label = { Text("Endereço IP") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 )
-                SectionTitle("Comandos (mover, presets, luz)")
-                OutlinedTextField(
-                    password, { password = it }, label = { Text("Senha da conta Tapo") }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                )
-                Text(
-                    "É a senha que você usa para entrar no aplicativo Tapo (conta TP-Link da dona da câmera). Fica guardada só neste " +
-                        "celular, cifrada. Cuidado: depois de várias senhas erradas a câmera bloqueia o login por um tempo.",
-                    color = Palette.Muted, fontSize = 12.sp,
-                )
-                SectionTitle("Vídeo ao vivo")
+                SectionTitle("Conta da câmera (vídeo, movimento e presets)")
                 OutlinedTextField(camUser, { camUser = it.trim() }, label = { Text("Usuário da Conta da câmera") }, singleLine = true)
                 OutlinedTextField(
                     camPass, { camPass = it }, label = { Text("Senha da Conta da câmera") }, singleLine = true,
@@ -278,13 +270,29 @@ private fun CameraEditDialog(initial: CameraConfig, onDismiss: () -> Unit, onSav
                 )
                 Text(
                     "Crie no app Tapo: abra a câmera › engrenagem › Configurações avançadas › Conta da câmera. " +
-                        "É diferente da conta Tapo e serve só para o vídeo (RTSP).",
+                        "Ela é só desta câmera e não depende da sua conta Tapo.",
                     color = Palette.Muted, fontSize = 12.sp,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    PadTile("Alta qualidade", Modifier.weight(1f), selected = high) { high = true }
-                    PadTile("Baixa (mais leve)", Modifier.weight(1f), selected = !high) { high = false }
+                    PadTile("Vídeo alta", Modifier.weight(1f), selected = high) { high = true }
+                    PadTile("Vídeo baixa", Modifier.weight(1f), selected = !high) { high = false }
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Mover e presets pela Conta da câmera (ONVIF)", color = Palette.Text, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Switch(checked = onvifOn, onCheckedChange = { onvifOn = it })
+                }
+                SectionTitle("Conta Tapo (opcional: luz e gravações)")
+                OutlinedTextField(
+                    password, { password = it }, label = { Text("Senha da conta Tapo") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+                Text(
+                    "A senha do aplicativo Tapo. Só é preciso para acender a luz e (em breve) as gravações do cartão — " +
+                        "ou para mover, se a Conta da câmera não for usada. Também precisa ligar no app Tapo: Eu › Serviços de " +
+                        "terceiros › Compatibilidade com terceiros. Fica guardada só neste celular, cifrada.",
+                    color = Palette.Muted, fontSize = 12.sp,
+                )
                 if (!showAdvanced) {
                     TextButton(onClick = { showAdvanced = true }) { Text("Avançado: endereço RTSP manual") }
                 } else {
@@ -294,7 +302,7 @@ private fun CameraEditDialog(initial: CameraConfig, onDismiss: () -> Unit, onSav
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     )
                 }
-                if (!valid) Text("Preencha o IP e a senha da conta Tapo.", color = Palette.Amber, fontSize = 12.sp)
+                if (!valid) Text("Preencha o IP e a Conta da câmera (ou a senha da conta Tapo).", color = Palette.Amber, fontSize = 12.sp)
             }
         },
         confirmButton = {
@@ -309,6 +317,7 @@ private fun CameraEditDialog(initial: CameraConfig, onDismiss: () -> Unit, onSav
                             cameraUser = camUser.trim(),
                             cameraPass = camPass,
                             highQuality = high,
+                            useOnvif = onvifOn,
                             rtspUrl = rtsp.trim(),
                         ),
                     )

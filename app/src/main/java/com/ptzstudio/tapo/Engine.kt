@@ -20,6 +20,9 @@ import com.ptzstudio.tapo.core.FoundCamera
 import com.ptzstudio.tapo.core.LightKind
 import com.ptzstudio.tapo.core.MappingEngine
 import com.ptzstudio.tapo.core.MotionConfig
+import com.ptzstudio.tapo.core.OnvifClient
+import com.ptzstudio.tapo.core.OnvifMotor
+import com.ptzstudio.tapo.core.PacketSender
 import com.ptzstudio.tapo.core.PadAction
 import com.ptzstudio.tapo.core.PadButton
 import com.ptzstudio.tapo.core.PadState
@@ -132,15 +135,29 @@ class Engine(private val context: Context) {
     @Volatile private var wifiNetwork: Network? = null
 
     // Conexão com a câmera em uso
+    /** Canal Tapo (conta Tapo): luz e gravações; também o movimento quando não há Conta da câmera. */
     @Volatile private var api: TapoApi? = null
+    /** Canal ONVIF (Conta da câmera): movimento e presets. */
+    @Volatile private var onvif: OnvifClient? = null
     @Volatile private var apiKey: String? = null
+    /** Login Tapo recusado com o ONVIF comandando: a luz fica parada, sem novas tentativas (bloqueio da câmera). */
+    @Volatile private var tapoBlocked: String? = null
     /** Fila única dos pedidos para a câmera (o movimento usa a sua própria thread). */
     private val net = Executors.newSingleThreadExecutor { r -> Thread(r, "tapo-rede").apply { isDaemon = true } }
     private val healthRunning = AtomicBoolean(false)
     @Volatile private var loaded = false
     @Volatile private var lastMoveError = 0L
+    private val trace = ArrayDeque<String>()
 
-    private val motor = TapoMotor(
+    private val _usingOnvif = MutableStateFlow(false)
+    /** Movimento e presets pela Conta da câmera (ONVIF). */
+    val usingOnvif: StateFlow<Boolean> = _usingOnvif.asStateFlow()
+
+    private val _tapoNote = MutableStateFlow<String?>(null)
+    /** Situação da conta Tapo quando ela é só para a luz (ex.: login recusado). */
+    val tapoNote: StateFlow<String?> = _tapoNote.asStateFlow()
+
+    private val tapoMotor = TapoMotor(
         move = { x, y ->
             // Com o login recusado, não tenta de novo a cada passo (a câmera bloquearia a conta).
             if (_link.value == LinkState.LOGIN_FAILED) throw TapoException(_linkDetail.value ?: "Login recusado")
@@ -149,7 +166,28 @@ class Engine(private val context: Context) {
         stepMax = { _settings.value.moveStep },
         onError = { e -> onMoveError(e) },
     )
-    val controller = PtzController(motor)
+    private val onvifMotor = OnvifMotor(
+        move = { x, y ->
+            if (_link.value == LinkState.LOGIN_FAILED) throw TapoException(_linkDetail.value ?: "Login recusado")
+            onvif?.move(x, y) ?: throw TapoException("Sem câmera")
+        },
+        stop = { onvif?.stop() },
+        onError = { e -> onMoveError(e) },
+    )
+    /** O controlador manda a velocidade; ela vai pelo ONVIF (movimento contínuo) ou em passos pela conta Tapo. */
+    private val router = PacketSender { p -> if (onvif != null) onvifMotor.send(p) else tapoMotor.send(p) }
+    val controller = PtzController(router)
+
+    private fun haltMotors() {
+        tapoMotor.halt()
+        onvifMotor.halt()
+    }
+
+    private fun note(t: String) = synchronized(trace) {
+        trace.addLast(t)
+        while (trace.size > 30) trace.removeFirst()
+    }
+
     private val mapping = MappingEngine(controller) { a -> main.post { runAction(a) } }
 
     private val loop = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "ptz-ciclo").apply { isDaemon = true } }
@@ -180,7 +218,8 @@ class Engine(private val context: Context) {
     init {
         controller.config = _settings.value.motion
         controller.limits = com.ptzstudio.tapo.core.CameraLimits()
-        motor.start()
+        tapoMotor.start()
+        onvifMotor.start()
         applyCamera()
         loop.scheduleAtFixedRate({ safeTick() }, 0, 20, TimeUnit.MILLISECONDS)
         val im = context.getSystemService(Context.INPUT_SERVICE) as InputManager
@@ -280,26 +319,53 @@ class Engine(private val context: Context) {
 
     /** Confere a câmera de tempos em tempos (na fila da rede). Na primeira vez, carrega presets e luz. */
     private fun health() {
-        val a = api ?: return
         if (_link.value == LinkState.LOGIN_FAILED) return
+        val o = onvif
+        val a = api
+        if (o == null && a == null) return
         if (!healthRunning.compareAndSet(false, true)) return
+        val key = apiKey
         net.execute {
             try {
-                val i = a.info()
-                if (a !== api) return@execute
-                _info.value = i
-                _auth.value = a.client.auth
-                if (!loaded) {
-                    loaded = true
-                    loadPresetsAndLight(a)
+                if (o != null) {
+                    if (!o.connected) {
+                        note("ONVIF: conectando (porta 2020, Conta da câmera)")
+                        o.connect()
+                        note("ONVIF: conectado; relógio da câmera ${o.clockOffsetMs / 1000} s em relação ao celular")
+                    }
+                    val i = o.info()
+                    if (key != apiKey) return@execute
+                    _info.value = TapoInfo(i.model, "", i.firmware)
+                    if (!loaded) {
+                        loaded = true
+                        _cameraPresets.value = try {
+                            o.presets().also { note("ONVIF: ${it.size} presets na câmera") }
+                        } catch (e: TapoException) {
+                            if (e.code == OnvifClient.ONVIF_AUTH) throw e
+                            note("ONVIF: presets indisponíveis (${e.message})")
+                            emptyList()
+                        }
+                        if (a != null) loadTapoExtras(a)
+                    }
+                } else {
+                    val i = a!!.info()
+                    if (key != apiKey) return@execute
+                    _info.value = i
+                    _auth.value = a.client.auth
+                    if (!loaded) {
+                        loaded = true
+                        loadPresetsAndLight(a)
+                    }
                 }
                 _link.value = LinkState.ONLINE
                 _linkDetail.value = null
             } catch (e: TapoException) {
-                if (a !== api) return@execute
+                if (key != apiKey) return@execute
+                note("erro: ${e.message}")
                 onCameraError(e)
             } catch (e: Exception) {
-                if (a !== api) return@execute
+                if (key != apiKey) return@execute
+                note("sem resposta: ${e.message}")
                 _link.value = LinkState.NO_REPLY
                 _linkDetail.value = "A câmera não respondeu. Confira o IP e se o celular está no mesmo Wi-Fi."
             } finally {
@@ -308,18 +374,26 @@ class Engine(private val context: Context) {
         }
     }
 
+    private fun isLoginProblem(e: TapoException) = e.code == -40411 || e.code == -40404 ||
+        (e.message ?: "").contains("Senha", true) || (e.message ?: "").contains("dona da câmera")
+
+    /** Erro no canal que comanda a câmera (ONVIF, ou a conta Tapo quando não há Conta da câmera). */
     private fun onCameraError(e: TapoException) {
-        val loginProblem = e.code == -40411 || e.code == -40404 || (e.message ?: "").contains("Senha", true) ||
-            (e.message ?: "").contains("dona da câmera")
-        if (loginProblem) {
+        if (isLoginProblem(e)) {
             // Para de tentar: cada senha errada conta para o bloqueio da câmera.
             _link.value = LinkState.LOGIN_FAILED
             controller.safetyStop(SystemClock.elapsedRealtime())
-            motor.halt()
+            haltMotors()
         } else if (_link.value != LinkState.ONLINE) {
             _link.value = LinkState.NO_REPLY
         }
         _linkDetail.value = e.message
+    }
+
+    /** Erro da conta Tapo usada só para a luz: não derruba o controle, só a luz. */
+    private fun onTapoError(e: TapoException) {
+        if (isLoginProblem(e)) tapoBlocked = e.message
+        _tapoNote.value = "Luz e gravações: " + (e.message ?: "erro da conta Tapo")
     }
 
     private fun loadPresetsAndLight(a: TapoApi) {
@@ -332,6 +406,19 @@ class Engine(private val context: Context) {
             a.detectLight()?.let { LightState(it.first, it.second) }
         } catch (e: TapoException) {
             null
+        }
+    }
+
+    /** Com o ONVIF comandando: a conta Tapo (se houver) só descobre a luz. */
+    private fun loadTapoExtras(a: TapoApi) {
+        try {
+            _light.value = a.detectLight()?.let { LightState(it.first, it.second) }
+            _auth.value = a.client.auth
+            _tapoNote.value = null
+        } catch (e: TapoException) {
+            onTapoError(e)
+        } catch (e: Exception) {
+            _tapoNote.value = "Luz e gravações: a câmera não respondeu na conta Tapo"
         }
     }
 
@@ -365,37 +452,48 @@ class Engine(private val context: Context) {
         }
     }
 
-    /** Monta a conexão com a câmera escolhida (de novo só se o IP ou a senha mudaram, ou se [force]). */
+    /** Monta a conexão com a câmera escolhida (de novo só se o IP ou as senhas mudaram, ou se [force]). */
     private fun applyCamera(force: Boolean = false) {
         val cam = _settings.value.selectedCamera
-        val key = cam?.let { "${it.id}|${it.ip.trim()}|${it.password}" }
+        val key = cam?.let { "${it.id}|${it.ip.trim()}|${it.password}|${it.cameraUser}|${it.cameraPass}|${it.onvifActive}" }
         if (!force && key == apiKey) return
         controller.stopNow(SystemClock.elapsedRealtime())
-        motor.halt()
+        haltMotors()
         apiKey = key
         loaded = false
+        tapoBlocked = null
+        _tapoNote.value = null
         _info.value = null
         _auth.value = null
         _cameraPresets.value = emptyList()
         _light.value = null
         _linkDetail.value = null
+        synchronized(trace) { trace.clear() }
         if (cam == null || cam.ip.isBlank()) {
             api = null
+            onvif = null
+            _usingOnvif.value = false
             _link.value = LinkState.NO_CAMERA
             return
         }
-        api = TapoApi(TapoClient(AndroidTapoHttp(cam.ip.trim(), { wifiNetwork }), cam.password))
+        val ip = cam.ip.trim()
+        onvif = if (cam.onvifActive) OnvifClient(AndroidOnvifHttp { wifiNetwork }, ip, cam.cameraUser, cam.cameraPass) else null
+        api = if (cam.password.isNotEmpty()) TapoApi(TapoClient(AndroidTapoHttp(ip, { wifiNetwork }), cam.password)) else null
+        _usingOnvif.value = onvif != null
+        note(if (onvif != null) "comandos pela Conta da câmera (ONVIF)" else "comandos pela conta Tapo")
+        if (onvif != null && api == null) _tapoNote.value = "Luz e gravações: coloque a senha da conta Tapo em Câmeras › Editar (opcional)."
         _link.value = LinkState.CONNECTING
-        if (cam.password.isEmpty()) {
+        if (onvif == null && api == null) {
             _link.value = LinkState.LOGIN_FAILED
-            _linkDetail.value = "Falta a senha da conta Tapo em Câmeras › Editar."
+            _linkDetail.value = "Coloque a Conta da câmera (recomendado) ou a senha da conta Tapo em Câmeras › Editar."
             return
         }
         lastHealthMs = 0L
     }
 
-    /** Passos do último login com a câmera (para descobrir por que ela recusou). */
-    fun loginTrace(): List<String> = api?.client?.loginTrace.orEmpty()
+    /** Passos da última conexão com a câmera (para descobrir por que ela recusou). Sem senhas. */
+    fun loginTrace(): List<String> =
+        synchronized(trace) { trace.toList() } + (api?.client?.loginTrace.orEmpty().map { "Tapo: $it" })
 
     /** Tenta conectar de novo (depois de corrigir a senha ou esperar o bloqueio passar). */
     fun reconnect() = applyCamera(force = true)
@@ -413,7 +511,7 @@ class Engine(private val context: Context) {
         foreground = false
         clearPad()
         controller.safetyStop(SystemClock.elapsedRealtime())
-        motor.halt()
+        haltMotors()
     }
 
     /**
@@ -423,13 +521,13 @@ class Engine(private val context: Context) {
     fun onFocusLost() {
         clearPad()
         controller.safetyStop(SystemClock.elapsedRealtime())
-        motor.halt()
+        haltMotors()
     }
 
     /** Usado quando o app vai fechar por erro: para de mandar movimento. */
     fun emergencyStop() {
         controller.stopNow(SystemClock.elapsedRealtime())
-        motor.halt()
+        haltMotors()
     }
 
     // ---------------- Configurações ----------------
@@ -448,14 +546,9 @@ class Engine(private val context: Context) {
 
     fun setMoveStep(step: Int) = update { it.copy(moveStep = step.coerceIn(1, AppSettings.MAX_STEP)) }
 
-    fun saveCamera(cam: CameraConfig) {
-        val old = _settings.value.cameras.firstOrNull { it.id == cam.id }
-        update { s ->
-            val list = if (s.cameras.any { it.id == cam.id }) s.cameras.map { if (it.id == cam.id) cam else it } else s.cameras + cam
-            s.copy(cameras = list, selectedCameraId = s.selectedCameraId ?: cam.id)
-        }
-        // Senha corrigida: tenta de novo mesmo se o IP é o mesmo.
-        if (old != null && old.password != cam.password && cam.id == _settings.value.selectedCamera?.id) reconnect()
+    fun saveCamera(cam: CameraConfig) = update { s ->
+        val list = if (s.cameras.any { it.id == cam.id }) s.cameras.map { if (it.id == cam.id) cam else it } else s.cameras + cam
+        s.copy(cameras = list, selectedCameraId = s.selectedCameraId ?: cam.id)
     }
 
     fun removeCamera(id: String) = update { s ->
@@ -502,14 +595,38 @@ class Engine(private val context: Context) {
         return resolved[n]?.name ?: "Preset $n"
     }
 
-    private fun onNet(what: String, block: (TapoApi) -> Unit) {
-        val a = api
-        if (a == null) {
+    /** Roda um comando na fila da rede, pelo canal que comanda a câmera. */
+    private fun onNet(what: String, block: () -> Unit) {
+        if (onvif == null && api == null) {
             say("Nenhuma câmera escolhida")
             return
         }
         if (_link.value == LinkState.LOGIN_FAILED) {
-            say(_linkDetail.value ?: "Login recusado: confira a senha em Câmeras › Editar")
+            say(_linkDetail.value ?: "Login recusado: confira em Câmeras › Editar")
+            return
+        }
+        net.execute {
+            try {
+                block()
+            } catch (e: TapoException) {
+                say(e.message ?: "$what: erro")
+                if (isLoginProblem(e)) main.post { onCameraError(e) }
+            } catch (e: Exception) {
+                say("$what: a câmera não respondeu")
+            }
+        }
+    }
+
+    /** Roda um comando que precisa da conta Tapo (luz, gravações). */
+    private fun onTapo(what: String, block: (TapoApi) -> Unit) {
+        val a = api
+        if (a == null) {
+            say("Para a luz, coloque a senha da conta Tapo em Câmeras › Editar")
+            return
+        }
+        tapoBlocked?.let { say(it); return }
+        if (onvif == null && _link.value == LinkState.LOGIN_FAILED) {
+            say(_linkDetail.value ?: "Login recusado")
             return
         }
         net.execute {
@@ -517,11 +634,16 @@ class Engine(private val context: Context) {
                 block(a)
             } catch (e: TapoException) {
                 say(e.message ?: "$what: erro")
-                if (e.code == -40411 || e.code == -40404) main.post { onCameraError(e) }
+                if (onvif != null) main.post { onTapoError(e) } else if (isLoginProblem(e)) main.post { onCameraError(e) }
             } catch (e: Exception) {
                 say("$what: a câmera não respondeu")
             }
         }
+    }
+
+    private fun listPresets(): List<TapoPreset> {
+        val o = onvif
+        return if (o != null) o.presets() else api!!.presets()
     }
 
     fun recallPreset(n: Int) {
@@ -531,37 +653,57 @@ class Engine(private val context: Context) {
             return
         }
         controller.latchUntilNeutral()
-        motor.halt()
+        haltMotors()
         say(presetLabel(n))
-        onNet("Preset") { it.gotoPreset(p.id) }
+        onNet("Preset") {
+            val o = onvif
+            if (o != null) o.gotoPreset(p.id) else api!!.gotoPreset(p.id)
+        }
     }
 
     /**
-     * Grava a posição atual no botão [n]. A Tapo não regrava um preset: o antigo do botão é apagado e um novo
-     * é criado com o mesmo nome; o botão passa a apontar para o novo.
+     * Grava a posição atual no botão [n]. Pelo ONVIF, o preset do botão é regravado no lugar. Pela conta Tapo,
+     * que não regrava, o antigo é apagado e um novo é criado com o mesmo nome.
      */
     fun savePreset(n: Int) {
         val camId = _settings.value.selectedCamera?.id ?: return
-        if (api == null) return say("Nenhuma câmera escolhida")
+        if (onvif == null && api == null) return say("Nenhuma câmera escolhida")
         val resolved = resolvedPresets()
         val name = presetLabel(n, resolved)
         val old = resolved[n]
         _busy.value = true
-        onNet("Gravar preset") { a ->
+        onNet("Gravar preset") {
             try {
-                val before = a.presets()
-                if (old != null && before.any { it.id == old.id }) a.deletePreset(old.id)
-                a.addPreset(name)
-                val after = a.presets()
-                val created = PresetSlots.newPreset(before.map { it.id }.toSet(), old?.id, after)
-                    ?: throw TapoException("A câmera não confirmou o preset novo")
-                _cameraPresets.value = after
+                val o = onvif
+                val createdId: String
+                if (o != null) {
+                    createdId = if (old != null) {
+                        try {
+                            o.setPreset(name, old.id)
+                        } catch (e: TapoException) {
+                            if (e.code == OnvifClient.ONVIF_AUTH) throw e
+                            val id = o.setPreset(name, null)
+                            try { o.removePreset(old.id) } catch (_: Exception) {}
+                            id
+                        }
+                    } else o.setPreset(name, null)
+                    _cameraPresets.value = o.presets()
+                } else {
+                    val a = api!!
+                    val before = a.presets()
+                    if (old != null && before.any { it.id == old.id }) a.deletePreset(old.id)
+                    a.addPreset(name)
+                    val after = a.presets()
+                    createdId = (PresetSlots.newPreset(before.map { it.id }.toSet(), old?.id, after)
+                        ?: throw TapoException("A câmera não confirmou o preset novo")).id
+                    _cameraPresets.value = after
+                }
                 main.post {
                     update { s ->
                         s.copy(cameras = s.cameras.map { c ->
                             if (c.id != camId) c else {
                                 // Congela os botões como estão agora, para nenhum outro mudar de lugar.
-                                val fixed = resolved.mapValues { it.value.id }.filterKeys { it != n } + (n to created.id)
+                                val fixed = resolved.mapValues { it.value.id }.filterKeys { it != n } + (n to createdId)
                                 c.copy(presetSlots = c.presetSlots + fixed)
                             }
                         })
@@ -572,22 +714,30 @@ class Engine(private val context: Context) {
                 _busy.value = false
             }
         }
+        if (_link.value == LinkState.LOGIN_FAILED) _busy.value = false
     }
 
     /** Lê de novo os presets da câmera (feitos no app Tapo, por exemplo). */
-    fun reloadPresets() = onNet("Presets") { a ->
-        _cameraPresets.value = a.presets()
+    fun reloadPresets() = onNet("Presets") {
+        _cameraPresets.value = listPresets()
         say("Presets atualizados: ${_cameraPresets.value.size} na câmera")
     }
 
     fun toggleLight() {
         val l = _light.value
         if (l == null) {
-            say(if (_link.value == LinkState.ONLINE) "Esta câmera não tem luz para acender" else "Câmera ainda não conectada")
+            say(
+                when {
+                    api == null -> "Para a luz, coloque a senha da conta Tapo em Câmeras › Editar"
+                    tapoBlocked != null -> tapoBlocked!!
+                    _link.value == LinkState.ONLINE -> "Esta câmera não tem luz para acender"
+                    else -> "Câmera ainda não conectada"
+                },
+            )
             return
         }
         val want = l.on != true
-        onNet("Luz") { a ->
+        onTapo("Luz") { a ->
             // O holofote só tem o comando "inverter": usa sempre ele, sem confiar no estado lido antes
             // (algumas câmeras informam o estado de outro jeito, e aí o comando nunca era mandado).
             if (l.kind == LightKind.WHITELAMP) a.setLight(l.kind, want, null) else a.setLight(l.kind, want, l.on)
@@ -610,7 +760,7 @@ class Engine(private val context: Context) {
 
     fun stopCamera() {
         controller.stopNow(SystemClock.elapsedRealtime())
-        motor.halt()
+        haltMotors()
     }
 
     /** Sobe ou desce a velocidade do Pan/Tilt um passo. */

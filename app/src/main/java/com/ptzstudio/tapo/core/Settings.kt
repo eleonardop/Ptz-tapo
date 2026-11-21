@@ -18,10 +18,15 @@ data class CameraConfig(
     val highQuality: Boolean = true,
     /** Endereço RTSP escrito à mão (vazio = montado sozinho com a conta da câmera). */
     val rtspUrl: String = "",
+    /** Mover e usar presets pela Conta da câmera (ONVIF), sem depender da conta Tapo. */
+    val useOnvif: Boolean = true,
     /** Qual preset da câmera fica em cada botão de preset do app (1..8 -> id na câmera). */
     val presetSlots: Map<Int, String> = emptyMap(),
 ) {
     val limits: CameraLimits get() = CameraLimits()
+
+    /** O ONVIF comanda a câmera (precisa da Conta da câmera). */
+    val onvifActive: Boolean get() = useOnvif && cameraUser.isNotBlank()
 
     /** Endereço do vídeo ao vivo (vazio = falta a conta da câmera). */
     val videoUrl: String
@@ -75,6 +80,7 @@ object SettingsCodec {
                     put("cameraUser", c.cameraUser)
                     put("cameraPass", c.cameraPass)
                     put("highQuality", c.highQuality)
+                    put("useOnvif", c.useOnvif)
                     put("rtspUrl", c.rtspUrl)
                     put("presetSlots", JSONObject().apply { c.presetSlots.forEach { (k, v) -> put(k.toString(), v) } })
                 })
@@ -132,6 +138,7 @@ object SettingsCodec {
                         cameraUser = c.optString("cameraUser", ""),
                         cameraPass = c.optString("cameraPass", ""),
                         highQuality = c.optBoolean("highQuality", true),
+                        useOnvif = c.optBoolean("useOnvif", true),
                         rtspUrl = c.optString("rtspUrl", ""),
                         presetSlots = slots,
                     )
