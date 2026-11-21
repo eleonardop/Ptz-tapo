@@ -404,7 +404,24 @@ class TapoClient(
          * JSON como o app Tapo manda: a org.json do Android escreve "/" como "\\/", o que estraga os textos em base64
          * do login nas câmeras que não desfazem esse escape (a câmera acha que a senha está errada).
          */
-        fun json(o: JSONObject): String = o.toString().replace("\\/", "/")
+        fun json(o: JSONObject): String {
+            val t = o.toString()
+            if (!t.contains("\\/")) return t
+            val out = StringBuilder(t.length)
+            var i = 0
+            while (i < t.length) {
+                val c = t[i]
+                if (c == '\\' && i + 1 < t.length) {
+                    val n = t[i + 1]
+                    if (n == '/') out.append('/') else out.append(c).append(n)
+                    i += 2
+                } else {
+                    out.append(c)
+                    i++
+                }
+            }
+            return out.toString()
+        }
 
         fun intBytes(v: Int) = byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte())
     }
