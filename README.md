@@ -27,6 +27,10 @@ Precisa de Android 10 ou mais novo.
 | Senha da conta Tapo | Mover, presets e luz | A mesma senha usada para entrar no app Tapo (conta da dona da câmera) |
 | Conta da câmera (usuário e senha) | Só o vídeo ao vivo | Criar no app Tapo › câmera › engrenagem › Configurações avançadas › Conta da câmera |
 
+**Importante:** no app Tapo, ligue **Eu › Serviços de terceiros › Compatibilidade com terceiros**
+(*Third-Party Compatibility*). Sem isso, câmeras com firmware novo (ex.: C500 1.3.5) recusam o login de outros
+apps mesmo com a senha certa. Confirmado na C500 1.3.5: com a chave ligada ela passa a usar o login seguro antigo.
+
 A senha da conta Tapo fica guardada só no celular, cifrada com a chave do próprio aparelho. Depois de várias senhas
 erradas a câmera bloqueia o login por um tempo; por isso o app para de tentar quando a senha é recusada
 (corrija em Câmeras › Editar e toque em Ajustes › Conectar de novo).

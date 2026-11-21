@@ -240,7 +240,11 @@ class TapoClient(
                 if (e.code != -40401) throw e
             }
         }
-        throw TapoException("Senha errada. Use a senha da conta Tapo (a mesma do aplicativo Tapo).", -40411)
+        throw TapoException(
+            "Login recusado. No app Tapo, ligue Eu › Serviços de terceiros › Compatibilidade com terceiros, espere alguns " +
+                "minutos e toque em Ajustes › Conectar de novo. Confira também se é a senha da conta Tapo.",
+            -40411,
+        )
     }
 
     private fun loginTpapWith(passcode: String) {

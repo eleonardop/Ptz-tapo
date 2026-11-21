@@ -18,9 +18,10 @@ Ficam em `app/src/test`. Não usam câmera nem controle de verdade.
 
 Só dá para confirmar no celular, com as câmeras:
 
-- [ ] **Login**: com a senha da conta Tapo o status fica **Câmera conectada** (C500, C310 e C320WS). Ajustes › Câmera em uso mostra o modelo, o firmware e o tipo de login.
+- [x] **Login na C500 (firmware 1.3.5)**: funciona com a Compatibilidade com terceiros ligada no app Tapo (login seguro antigo, senha em SHA-256). Sem a chave, a câmera usa o login TPAP e recusou a senha.
+- [ ] **Login** na C310 e na C320WS (ligar a Compatibilidade com terceiros antes). Ajustes › Câmera em uso mostra o modelo, o firmware e o tipo de login.
 - [ ] Senha errada: aparece **Login recusado** e o app para de tentar.
-- [ ] **Vídeo** com a Conta da câmera, em alta e baixa qualidade.
+- [x] **Vídeo** com a Conta da câmera (C500).
 - [ ] **Movimento na C500**: o joystick move para o lado certo (se invertido, usar Ajustes › Inverter). Ajustar o **Tamanho máximo do passo** até ficar bom: rápido o suficiente, mas parando logo depois de soltar.
 - [ ] **Presets**: os presets já feitos no app Tapo aparecem nos botões; gravar pelo app (segurar › Gravar) funciona e não bagunça os outros botões.
 - [ ] **Luz da C320WS** acende e apaga, e o botão mostra o estado certo. (O app tenta, nesta ordem, os comandos de holofote, refletor e luz branca forçada; Ajustes mostra qual funcionou.)
