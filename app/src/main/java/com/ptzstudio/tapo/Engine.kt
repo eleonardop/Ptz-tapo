@@ -477,7 +477,7 @@ class Engine(private val context: Context) {
             return
         }
         val ip = cam.ip.trim()
-        onvif = if (cam.onvifActive) OnvifClient(AndroidOnvifHttp { wifiNetwork }, ip, cam.cameraUser, cam.cameraPass) else null
+        onvif = if (cam.onvifActive) OnvifClient(AndroidOnvifHttp(network = { wifiNetwork }), ip, cam.cameraUser, cam.cameraPass) else null
         api = if (cam.password.isNotEmpty()) TapoApi(TapoClient(AndroidTapoHttp(ip, { wifiNetwork }), cam.password)) else null
         _usingOnvif.value = onvif != null
         note(if (onvif != null) "comandos pela Conta da câmera (ONVIF)" else "comandos pela conta Tapo")
