@@ -232,7 +232,7 @@ class TapoClient(
         val scalar = ByteArray(32).also { random.nextBytes(it) }
         val client = Spake2pClient(
             devSalt = TapoHash.unb64(r.getString("dev_salt")),
-            iterations = r.getString("iterations").toInt(),
+            iterations = r.optString("iterations").toIntOrNull() ?: throw TapoException("Resposta de login incompleta"),
             devShare = TapoHash.unb64(r.getString("dev_share")),
             userRandom = userRandom,
             devRandom = TapoHash.unb64(r.getString("dev_random")),
@@ -254,7 +254,7 @@ class TapoClient(
         key = k
         baseNonce = n
         stok = sr.getString("stok")
-        seq = sr.getString("start_seq").toInt()
+        seq = sr.optString("start_seq").toIntOrNull() ?: throw TapoException("Resposta de login incompleta")
         val life = sr.optString("expired").toLongOrNull() ?: 3600L
         expiresAtMs = System.currentTimeMillis() + life * 1000
     }
